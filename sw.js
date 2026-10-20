@@ -1,6 +1,8 @@
-// Keeps the app loading at the gym even with weak signal.
-// Serves the saved copy right away and refreshes it in the background.
-const CACHE = 'liftlog-v1';
+// Keeps the app working at the gym with weak or no signal.
+// The app page itself: try the network first (so updates show right away),
+// but fall back to the saved copy if the network is slow or down.
+// Icons and other files: serve the saved copy and refresh it in the background.
+const CACHE = 'liftlog-v2';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -15,13 +17,30 @@ self.addEventListener('activate', e => {
   );
 });
 
+function timeout(ms){ return new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)); }
+
 self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET') return;
-  if (new URL(e.request.url).origin !== location.origin) return;
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  if (new URL(req.url).origin !== location.origin) return;
+
+  if (req.mode === 'navigate'){
+    e.respondWith(caches.open(CACHE).then(async cache => {
+      try {
+        const res = await Promise.race([fetch(req), timeout(3000)]);
+        if (res.ok) cache.put('./index.html', res.clone());
+        return res;
+      } catch (err) {
+        return (await cache.match('./index.html')) || (await cache.match('./')) || Response.error();
+      }
+    }));
+    return;
+  }
+
   e.respondWith(caches.open(CACHE).then(async cache => {
-    const hit = await cache.match(e.request, {ignoreSearch: true});
-    const fresh = fetch(e.request)
-      .then(res => { if (res.ok) cache.put(e.request, res.clone()); return res; })
+    const hit = await cache.match(req, {ignoreSearch: true});
+    const fresh = fetch(req)
+      .then(res => { if (res.ok) cache.put(req, res.clone()); return res; })
       .catch(() => hit);
     return hit || fresh;
   }));

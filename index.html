@@ -28,22 +28,26 @@
   }
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0}
+/* App-shell layout: the page itself never scrolls. Only #scroller does,
+   so iOS can't shift the header or menu after the keyboard closes. */
+html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none}
 body{
   background:var(--bg);color:var(--text);
   font:16px/1.4 var(--font);
-  padding:calc(env(safe-area-inset-top) + 58px) 16px calc(env(safe-area-inset-bottom) + 86px);
+  display:flex;flex-direction:column;
   -webkit-text-size-adjust:100%;
 }
+@supports (height:100dvh){body{height:100dvh}}
 button,a,label,summary{touch-action:manipulation}
 header{
-  position:fixed;top:0;left:0;right:0;z-index:5;background:var(--bg);
+  flex:none;background:var(--bg);
   padding:calc(env(safe-area-inset-top) + 12px) 16px 10px;border-bottom:1px solid var(--line);
 }
 header h1{margin:0 auto;max-width:560px;font-size:22px;font-weight:700}
+#scroller{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:0 16px 28px}
 main{max-width:560px;margin:0 auto}
 nav{
-  position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;justify-content:center;
+  flex:none;display:flex;justify-content:center;
   background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom);
 }
 nav button{
@@ -91,7 +95,16 @@ p{margin:8px 0}
 .wbox input{width:62px;border:0;background:transparent;color:var(--text);font:700 21px/1 var(--font);text-align:right;padding:0}
 .wbox input:focus{outline:none}
 .wbox span{color:var(--muted);font-weight:600}
-.warm{display:flex;align-items:center;gap:10px;width:100%;margin-top:12px;padding:0;border:0;background:none;color:var(--muted);font:15px/1.3 var(--font);text-align:left}
+.warm-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:12px}
+.warm{flex:1;min-width:0;display:flex;align-items:center;gap:10px;padding:0;border:0;background:none;color:var(--muted);font:15px/1.3 var(--font);text-align:left}
+.mini{flex:none;display:flex;align-items:center;gap:6px}
+.mstep{width:36px;height:36px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:500 20px/1 var(--font)}
+.mbox{display:flex;align-items:center;gap:3px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:0 8px;height:36px}
+.mbox input{width:38px;border:0;background:transparent;color:var(--text);font:600 16px/1 var(--font);text-align:right;padding:0}
+.mbox input:focus{outline:none}
+.mbox span{color:var(--muted);font-size:14px}
+.sess-time{font-size:14px;color:var(--muted);margin-top:2px}
+.h-time{font-size:14px;color:var(--muted);margin:2px 0 4px}
 .warm .box{flex:none;width:24px;height:24px;border-radius:7px;border:2px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800}
 .warm.on{color:var(--text)}
 .warm.on .box{background:var(--good);border-color:var(--good);color:#fff}
@@ -142,7 +155,7 @@ h3.group{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(
 </head>
 <body>
 <header><h1 id="title">Lift</h1></header>
-<main id="view"></main>
+<div id="scroller"><main id="view"></main></div>
 <nav>
   <button data-tab="lift"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 7v10M3 9.5v5M18 7v10M21 9.5v5M6 12h12"/></svg>Lift</button>
   <button data-tab="cardio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-5 4 10 2-5h6"/></svg>Cardio</button>
@@ -253,7 +266,7 @@ function defaultState(){
   return {version:1, program:JSON.parse(JSON.stringify(DEFAULT_PROGRAM)), next:'A', exercises, custom:{},
           history:[], session:null, cardioLast:{}, settings:{shortcut:'Rest Timer', warmups:true, lastBackup:null, lastMachine:'treadmill'}};
 }
-function newEx(weight, increment, rest){ return {weight, increment, sets:3, repMin:8, repMax:12, rest:rest||90, fails:0}; }
+function newEx(weight, increment, rest){ return {weight, increment, sets:3, repMin:8, repMax:12, rest:rest||90, fails:0, warmWeight:null, warmReps:10}; }
 function migrate(s){
   const d = defaultState();
   s.settings = Object.assign({}, d.settings, s.settings || {});
@@ -261,6 +274,11 @@ function migrate(s){
   s.exercises = s.exercises || {};
   for (const id in d.exercises) if (!s.exercises[id]) s.exercises[id] = d.exercises[id];
   for (const id in s.custom) if (!s.exercises[id]) s.exercises[id] = newEx(0, 5, 90);
+  for (const id in s.exercises){
+    const e = s.exercises[id];
+    if (e.warmWeight === undefined) e.warmWeight = null;
+    if (!(e.warmReps >= 1)) e.warmReps = 10;
+  }
   s.program = s.program || d.program;
   for (const w of ['A','B']) s.program[w] = (s.program[w] || []).filter(id => LIB[id] || s.custom[id]);
   s.history = Array.isArray(s.history) ? s.history : [];
@@ -302,7 +320,20 @@ function fmtDate(iso){
   if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
   return d.toLocaleDateString('en-US', opts);
 }
-function warmWeight(w, inc){ const x = Math.floor((w * 0.5) / inc) * inc; return x >= inc ? x : 0; }
+function autoWarm(w, inc){ const x = Math.floor((w * 0.5) / inc) * inc; return x >= inc ? x : 0; }
+// Warm-up weight: your saved choice if you've set one, otherwise about half the working weight.
+function warmFor(id, workWeight){ const e = ex(id); return e.warmWeight != null ? e.warmWeight : autoWarm(workWeight, e.increment); }
+function fmtTime(iso){ return new Date(iso).toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'}); }
+function fmtDur(ms){
+  const m = Math.max(0, Math.round(ms / 60000));
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)} hr ${m % 60} min`;
+}
+function timeLine(x){
+  if (!x.started || !x.finished) return '';
+  return `${fmtTime(x.started)} – ${fmtTime(x.finished)} · ${fmtDur(Date.parse(x.finished) - Date.parse(x.started))}`;
+}
+function toTop(){ const s = $('#scroller'); if (s) s.scrollTop = 0; }
 
 let toastT;
 function toast(msg){ const el = $('#toast'); el.textContent = msg; el.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('show'), 2400); }
@@ -339,7 +370,8 @@ function renderLift(){
     return html;
   }
   const anyLogged = ss.items.some(it => it.reps.some(r => r != null));
-  html += `<div class="sess-head"><div><div class="eyebrow">In progress</div><h2>Workout ${ss.workout}</h2></div>
+  html += `<div class="sess-head"><div><div class="eyebrow">In progress</div><h2>Workout ${ss.workout}</h2>
+      <div class="sess-time">Started ${fmtTime(ss.started)} · <span id="elapsed">${fmtDur(Date.now() - Date.parse(ss.started))}</span></div></div>
     ${anyLogged ? '' : `<button class="btn small" data-act="swap">Switch to ${ss.workout === 'A' ? 'B' : 'A'}</button>`}</div>`;
   if (!ss.items.length) html += `<p class="muted">This workout has no exercises. Add some in Setup.</p>`;
   ss.items.forEach((it, i) => { html += exCard(it, i, i === 0); });
@@ -361,9 +393,15 @@ function exCard(it, i, first){
   }).join('');
   let warm = '';
   if (S.settings.warmups){
-    const ww = warmWeight(it.weight, e.increment);
-    warm = `<button class="warm ${it.warm ? 'on' : ''}" data-act="warm" data-i="${i}"><span class="box">${it.warm ? '✓' : ''}</span>
-      <span>Warm-up: ${ww ? `10 easy reps at ${fmtW(ww)}` : '10 easy reps with a light weight'}</span></button>`;
+    const ww = warmFor(it.id, it.weight);
+    warm = `<div class="warm-row">
+      <button class="warm ${it.warm ? 'on' : ''}" data-act="warm" data-i="${i}"><span class="box">${it.warm ? '✓' : ''}</span>
+        <span>Warm-up<br><span class="small">${e.warmReps} easy reps</span></span></button>
+      <div class="mini">
+        <button class="mstep" data-act="wwstep" data-d="-1" data-i="${i}" aria-label="Lighter warm-up">−</button>
+        <label class="mbox"><input type="number" inputmode="decimal" step="any" min="0" value="${num(ww)}" data-ch="wwset" data-i="${i}" aria-label="Warm-up weight"><span>lb</span></label>
+        <button class="mstep" data-act="wwstep" data-d="1" data-i="${i}" aria-label="Heavier warm-up">+</button>
+      </div></div>`;
   }
   return `<section class="card">
     <div class="ex-head"><div><h3>${esc(d.name)}</h3><div class="muted small">${scheme(e)} · ${esc(d.load)}</div></div>
@@ -429,9 +467,13 @@ function renderHistory(){
   if (!S.history.length) return `<p class="empty">Nothing here yet. Finished lifting sessions and saved cardio show up here.</p>`;
   const items = S.history.slice(0, histLimit).map(x => {
     if (x.kind === 'lift'){
-      return `<section class="card"><div class="h-top"><div><div class="h-date">${fmtDate(x.date)}</div><h3>Workout ${x.workout}</h3></div>
-        <button class="link danger small" data-act="del" data-id="${x.id}" style="padding:0">Delete</button></div>
-        ${x.items.map(it => `<div class="h-line"><div><div>${esc(it.name)}</div><div class="muted small">${it.result === 'skip' ? 'Not done' : `${fmtW(it.weight)} · ${it.reps.map(r => r == null ? '–' : r).join(', ')}`}</div></div>
+      const tl = timeLine(x);
+      return `<section class="card"><div class="h-top"><div><div class="h-date">${fmtDate(x.started || x.date)}</div><h3>Workout ${x.workout}</h3>
+          ${tl ? `<div class="h-time">${tl}</div>` : ''}</div>
+        <div style="text-align:right">
+          ${x.started ? `<button class="link small" data-act="edit-times" data-id="${x.id}" style="padding:0 0 8px;display:block;margin-left:auto">Edit times</button>` : ''}
+          <button class="link danger small" data-act="del" data-id="${x.id}" style="padding:0">Delete</button></div></div>
+        ${x.items.map(it => `<div class="h-line"><div><div>${esc(it.name)}</div><div class="muted small">${it.result === 'skip' ? 'Not done' : `${fmtW(it.weight)} · ${it.reps.map(r => r == null ? '–' : r).join(', ')}${it.warm != null ? ` · warm-up ${fmtW(it.warm)}` : ''}`}</div></div>
           <span class="tag ${it.result}">${tagText(it)}</span></div>`).join('')}</section>`;
     }
     const M = MACHINES[x.machine] || {name:'Cardio'};
@@ -488,10 +530,10 @@ function renderSetup(){
 }
 
 /* ---------- Lifting logic ---------- */
-function startSession(w){
-  S.session = {workout:w, started:new Date().toISOString(),
+function startSession(w, keepStart){
+  S.session = {workout:w, started:keepStart || new Date().toISOString(),
     items:S.program[w].map(id => ({id, weight:ex(id).weight, reps:Array(ex(id).sets).fill(null), warm:false}))};
-  openForm.clear(); save(); render(); window.scrollTo(0,0);
+  openForm.clear(); save(); render(); toTop();
 }
 
 function evaluate(it){
@@ -529,18 +571,46 @@ function finish(){
   }
   const partial = ss.items.some(it => it.reps.some(r => r == null) && it.reps.some(r => r != null));
   if (partial && !confirm('Some sets are not logged. They will count as missed. Finish anyway?')) return;
-  const entry = {id:uid(), kind:'lift', date:new Date().toISOString(), workout:ss.workout, items:[]};
+  const now = new Date().toISOString();
+  const entry = {id:uid(), kind:'lift', date:now, started:ss.started, finished:now, workout:ss.workout, items:[]};
   for (const it of ss.items){
+    const warm = it.warm ? warmFor(it.id, it.weight) : null;
     const r = evaluate(it);
-    entry.items.push({id:it.id, name:def(it.id).name, weight:it.weight, reps:it.reps.slice(), result:r.result, next:r.next, fails:r.fails || 0});
+    entry.items.push({id:it.id, name:def(it.id).name, weight:it.weight, reps:it.reps.slice(), warm, result:r.result, next:r.next, fails:r.fails || 0});
   }
   S.history.unshift(entry);
   S.next = ss.workout === 'A' ? 'B' : 'A';
-  S.session = null; openForm.clear(); save(); render(); window.scrollTo(0,0);
+  S.session = null; openForm.clear(); save(); render(); toTop();
   openModal(`<h2>Workout ${entry.workout} saved</h2>
+    <p class="muted">${timeLine(entry)}</p>
     ${entry.items.map(x => `<div class="res"><strong>${esc(x.name)}</strong><p>${esc(resultText(x))}</p></div>`).join('')}
-    <p class="muted small">Next session: Workout ${S.next}.</p>
+    <p class="muted small">Next session: Workout ${S.next}. If the times are off, tap Edit times on this workout in History.</p>
     <button class="primary big" data-act="close">Done</button>`);
+}
+
+/* Correct start or finish time on a saved workout (for example, if you forgot to tap Finish). */
+function hhmm(iso){ const d = new Date(iso); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
+function editTimes(id){
+  const x = S.history.find(h => h.id === id); if (!x) return;
+  openModal(`<h2>Edit times</h2><p class="muted small">Workout ${x.workout}, ${fmtDate(x.started)}</p>
+    <div class="grid2">
+      <label class="field"><span>Started</span><input id="t_start" type="time" value="${hhmm(x.started)}"></label>
+      <label class="field"><span>Finished</span><input id="t_end" type="time" value="${hhmm(x.finished)}"></label>
+    </div>
+    <button class="primary big" data-act="save-times" data-id="${id}">Save</button>
+    <button class="link center" data-act="close">Cancel</button>`);
+}
+function saveTimes(id){
+  const x = S.history.find(h => h.id === id); if (!x) return;
+  const set = (iso, v) => { const [h, m] = v.split(':').map(Number); const d = new Date(iso); d.setHours(h, m, 0, 0); return d; };
+  const sv = $('#t_start').value, ev = $('#t_end').value;
+  if (!sv || !ev) return toast('Enter both times.');
+  const s = set(x.started, sv), e = set(x.started, ev);
+  if (e <= s) e.setDate(e.getDate() + 1);   // finished after midnight
+  if (e - s > 6 * 3600000) return toast('That is over 6 hours. Check the times.');
+  x.started = s.toISOString(); x.finished = e.toISOString(); x.date = x.finished;
+  S.history.sort((a,b) => b.date.localeCompare(a.date));
+  save(); closeModal(); render(); toast('Times updated.');
 }
 
 /* ---------- Cardio ---------- */
@@ -577,7 +647,10 @@ function editExercise(id){
       ${numField('f_max','Reps, high end',e.repMax,'1')}
       ${numField('f_sets','Sets',e.sets,'1')}
       ${numField('f_rest','Rest (seconds)',e.rest,'15')}
+      <label class="field"><span>Warm-up weight (lb)</span><input id="f_ww" type="number" inputmode="decimal" step="any" min="0" value="${e.warmWeight != null ? num(e.warmWeight) : ''}" placeholder="Auto: ${num(autoWarm(e.weight, e.increment))}"></label>
+      ${numField('f_wr','Warm-up reps',e.warmReps,'1')}
     </div>
+    <p class="hint">Leave warm-up weight blank to use about half your working weight.</p>
     <details><summary>Form notes</summary>${formBlock(d)}</details>
     <button class="primary big" data-act="save-ex" data-id="${id}">Save</button>
     <button class="link center" data-act="close">Cancel</button>`);
@@ -590,9 +663,12 @@ function saveExercise(id){
   if (!(mn >= 1) || !(mx >= mn)) return toast('Check the rep range.');
   if (!(sets >= 1 && sets <= 10)) return toast('Sets must be between 1 and 10.');
   if (!(rest >= 0 && rest <= 900)) return toast('Rest must be between 0 and 900 seconds.');
+  const wwRaw = $('#f_ww').value.trim(), ww = wwRaw === '' ? null : parseFloat(wwRaw), wr = Math.round(g('f_wr'));
+  if (ww !== null && !(ww >= 0)) return toast('Enter a warm-up weight of 0 or more, or leave it blank.');
+  if (!(wr >= 1 && wr <= 30)) return toast('Warm-up reps must be between 1 and 30.');
   const e = ex(id);
   if (w !== e.weight) e.fails = 0;
-  Object.assign(e, {weight:w, increment:inc, repMin:mn, repMax:mx, sets, rest});
+  Object.assign(e, {weight:w, increment:inc, repMin:mn, repMax:mx, sets, rest, warmWeight:ww === null ? null : num(ww), warmReps:wr});
   if (S.custom[id]){ const n = $('#f_name').value.trim(); if (n) S.custom[id].name = n; }
   if (S.session) S.session.items.forEach(it => {
     if (it.id !== id) return;
@@ -670,11 +746,18 @@ function importBackup(file){
 document.addEventListener('click', e => {
   if (e.target.id === 'modal'){ closeModal(); return; }
   const t = e.target.closest('[data-act],[data-tab]'); if (!t) return;
-  if (t.dataset.tab){ tab = t.dataset.tab; render(); window.scrollTo(0,0); return; }
+  if (t.dataset.tab){ tab = t.dataset.tab; render(); toTop(); return; }
   const a = t.dataset.act, i = +t.dataset.i, ss = S.session;
   switch (a){
     case 'start': startSession(t.dataset.w); break;
-    case 'swap': startSession(ss.workout === 'A' ? 'B' : 'A'); break;
+    case 'swap': startSession(ss.workout === 'A' ? 'B' : 'A', ss.started); break;
+    case 'wwstep': {
+      const it = ss.items[i], e = ex(it.id);
+      e.warmWeight = num(Math.max(0, warmFor(it.id, it.weight) + e.increment * +t.dataset.d));
+      save(); render(); break;
+    }
+    case 'edit-times': editTimes(t.dataset.id); break;
+    case 'save-times': saveTimes(t.dataset.id); break;
     case 'tap': {
       const it = ss.items[i], j = +t.dataset.j, r = it.reps[j];
       it.reps[j] = r == null ? ex(it.id).repMax : (r > 0 ? r - 1 : null);
@@ -728,10 +811,26 @@ document.addEventListener('change', e => {
     if (isFinite(v) && v >= 0) it.weight = num(v);
     save(); render();
   }
+  if (c === 'wwset' && S.session){
+    const v = parseFloat(t.value), it = S.session.items[+t.dataset.i];
+    if (isFinite(v) && v >= 0) ex(it.id).warmWeight = num(v);
+    save(); render();
+  }
   if (c === 'shortcut'){ S.settings.shortcut = t.value.trim() || 'Rest Timer'; save(); render(); }
   if (c === 'warmups'){ S.settings.warmups = t.checked; save(); }
   if (c === 'import'){ importBackup(t.files[0]); t.value = ''; }
 });
+
+/* iOS fix: after the keyboard closes, iOS can leave the page shifted. Snap it back. */
+function resetViewport(){ if (window.scrollY || window.scrollX) window.scrollTo(0, 0); }
+document.addEventListener('focusout', () => setTimeout(resetViewport, 60));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', () => setTimeout(resetViewport, 60));
+
+/* Keep the elapsed workout time current without redrawing the screen. */
+setInterval(() => {
+  const el = document.getElementById('elapsed');
+  if (el && S.session) el.textContent = fmtDur(Date.now() - Date.parse(S.session.started));
+}, 20000);
 
 render();
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
